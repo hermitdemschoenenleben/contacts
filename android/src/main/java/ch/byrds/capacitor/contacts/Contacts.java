@@ -15,11 +15,13 @@ import android.util.Base64;
 import android.util.Log;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -30,8 +32,6 @@ import org.json.JSONObject;
 
 @CapacitorPlugin(
     name = "Contacts",
-    //requestCodes is labeled as legacy in bridge
-    requestCodes = Contacts.REQUEST_CODE,
     permissions = { @Permission(strings = { Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS }, alias = "contacts") }
 )
 public class Contacts extends Plugin {
@@ -58,8 +58,10 @@ public class Contacts extends Plugin {
 
     @PluginMethod
     public void getPermissions(PluginCall call) {
-        if (!hasRequiredPermissions()) {
-            requestPermissions(call);
+        if (getPermissionState("contacts") != PermissionState.GRANTED) {
+            JSObject result = new JSObject();
+            result.put("granted", false);
+            call.resolve(result);
         } else {
             JSObject result = new JSObject();
             result.put("granted", true);
@@ -67,156 +69,160 @@ public class Contacts extends Plugin {
         }
     }
 
-    @Override
-    protected void handleRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        super.handleRequestPermissionsResult(requestCode, permissions, grantResults);
-
-        PluginCall savedCall = getSavedCall();
-        JSObject result = new JSObject();
-
-        if (!hasRequiredPermissions()) {
-            result.put("granted", false);
-            savedCall.resolve(result);
+    /**
+     * Completes the getContacts plugin call after a permission request
+     *
+     * @param call the plugin call
+     * @see #getContacts(PluginCall)
+     */
+    @PermissionCallback
+    private void completeGetContacts(PluginCall call) {
+        if (getPermissionState("contacts") == PermissionState.GRANTED) {
+            getContacts(call);
         } else {
-            result.put("granted", true);
-            savedCall.resolve(result);
+            call.reject("Access contacts permission was denied");
         }
     }
 
+
     @PluginMethod
     public void getContacts(PluginCall call) {
-        JSArray jsContacts = new JSArray();
+        if (getPermissionState("contacts") != PermissionState.GRANTED) {
+            requestAllPermissions(call, "completeGetContacts");
+        } else {
+            JSArray jsContacts = new JSArray();
 
-        ContentResolver contentResolver = getContext().getContentResolver();
+            ContentResolver contentResolver = getContext().getContentResolver();
 
-        String[] projection = new String[] {
-            ContactsContract.Data.MIMETYPE,
-            Organization.TITLE,
-            ContactsContract.Contacts._ID,
-            ContactsContract.Data.CONTACT_ID,
-            ContactsContract.Contacts.DISPLAY_NAME,
-            ContactsContract.Contacts.Photo.PHOTO,
-            ContactsContract.CommonDataKinds.Contactables.DATA,
-            ContactsContract.CommonDataKinds.Contactables.TYPE,
-            ContactsContract.CommonDataKinds.Contactables.LABEL
-        };
-        String selection = ContactsContract.Data.MIMETYPE + " in (?, ?, ?, ?, ?)";
-        String[] selectionArgs = new String[] {
-            Email.CONTENT_ITEM_TYPE,
-            Phone.CONTENT_ITEM_TYPE,
-            Event.CONTENT_ITEM_TYPE,
-            Organization.CONTENT_ITEM_TYPE,
-            Photo.CONTENT_ITEM_TYPE
-        };
+            String[] projection = new String[] {
+                ContactsContract.Data.MIMETYPE,
+                Organization.TITLE,
+                ContactsContract.Contacts._ID,
+                ContactsContract.Data.CONTACT_ID,
+                ContactsContract.Contacts.DISPLAY_NAME,
+                ContactsContract.Contacts.Photo.PHOTO,
+                ContactsContract.CommonDataKinds.Contactables.DATA,
+                ContactsContract.CommonDataKinds.Contactables.TYPE,
+                ContactsContract.CommonDataKinds.Contactables.LABEL
+            };
+            String selection = ContactsContract.Data.MIMETYPE + " in (?, ?, ?, ?, ?)";
+            String[] selectionArgs = new String[] {
+                Email.CONTENT_ITEM_TYPE,
+                Phone.CONTENT_ITEM_TYPE,
+                Event.CONTENT_ITEM_TYPE,
+                Organization.CONTENT_ITEM_TYPE,
+                Photo.CONTENT_ITEM_TYPE
+            };
 
-        Cursor contactsCursor = contentResolver.query(ContactsContract.Data.CONTENT_URI, projection, selection, selectionArgs, null);
+            Cursor contactsCursor = contentResolver.query(ContactsContract.Data.CONTENT_URI, projection, selection, selectionArgs, null);
 
-        if (contactsCursor != null && contactsCursor.getCount() > 0) {
-            HashMap<Object, JSObject> contactsById = new HashMap<>();
+            if (contactsCursor != null && contactsCursor.getCount() > 0) {
+                HashMap<Object, JSObject> contactsById = new HashMap<>();
 
-            while (contactsCursor.moveToNext()) {
-                String _id = contactsCursor.getString(contactsCursor.getColumnIndex(ContactsContract.Contacts._ID));
-                String contactId = contactsCursor.getString(contactsCursor.getColumnIndex(ContactsContract.Data.CONTACT_ID));
+                while (contactsCursor.moveToNext()) {
+                    String _id = contactsCursor.getString(contactsCursor.getColumnIndex(ContactsContract.Contacts._ID));
+                    String contactId = contactsCursor.getString(contactsCursor.getColumnIndex(ContactsContract.Data.CONTACT_ID));
 
-                JSObject jsContact = new JSObject();
+                    JSObject jsContact = new JSObject();
 
-                if (!contactsById.containsKey(contactId)) {
-                    // this contact does not yet exist in HashMap,
-                    // so put it to the HashMap
+                    if (!contactsById.containsKey(contactId)) {
+                        // this contact does not yet exist in HashMap,
+                        // so put it to the HashMap
 
-                    jsContact.put(CONTACT_ID, contactId);
-                    String displayName = contactsCursor.getString(contactsCursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME));
+                        jsContact.put(CONTACT_ID, contactId);
+                        String displayName = contactsCursor.getString(contactsCursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME));
 
-                    jsContact.put(DISPLAY_NAME, displayName);
-                    JSArray jsPhoneNumbers = new JSArray();
-                    jsContact.put(PHONE_NUMBERS, jsPhoneNumbers);
-                    JSArray jsEmailAddresses = new JSArray();
-                    jsContact.put(EMAILS, jsEmailAddresses);
+                        jsContact.put(DISPLAY_NAME, displayName);
+                        JSArray jsPhoneNumbers = new JSArray();
+                        jsContact.put(PHONE_NUMBERS, jsPhoneNumbers);
+                        JSArray jsEmailAddresses = new JSArray();
+                        jsContact.put(EMAILS, jsEmailAddresses);
 
-                    jsContacts.put(jsContact);
-                } else {
-                    // this contact already exists,
-                    // retrieve it
-                    jsContact = contactsById.get(contactId);
-                }
-
-                if (jsContact != null) {
-                    String mimeType = contactsCursor.getString(contactsCursor.getColumnIndex(ContactsContract.Data.MIMETYPE));
-                    String data = contactsCursor.getString(
-                        contactsCursor.getColumnIndex(ContactsContract.CommonDataKinds.Contactables.DATA)
-                    );
-                    int type = contactsCursor.getInt(contactsCursor.getColumnIndex(ContactsContract.CommonDataKinds.Contactables.TYPE));
-                    String label = contactsCursor.getString(
-                        contactsCursor.getColumnIndex(ContactsContract.CommonDataKinds.Contactables.LABEL)
-                    );
-
-                    // email
-                    switch (mimeType) {
-                        case Email.CONTENT_ITEM_TYPE:
-                            try {
-                                // add this email to the list
-                                JSArray emailAddresses = (JSArray) jsContact.get(EMAILS);
-                                JSObject jsEmail = new JSObject();
-                                jsEmail.put(EMAIL_LABEL, mapEmailTypeToLabel(type, label));
-                                jsEmail.put(EMAIL_ADDRESS, data);
-                                emailAddresses.put(jsEmail);
-                            } catch (JSONException e) {
-                                e.printStackTrace();
-                            }
-                            break;
-                        // phone
-                        case Phone.CONTENT_ITEM_TYPE:
-                            try {
-                                // add this phone to the list
-                                JSArray jsPhoneNumbers = (JSArray) jsContact.get(PHONE_NUMBERS);
-                                JSObject jsPhone = new JSObject();
-                                jsPhone.put(PHONE_LABEL, mapPhoneTypeToLabel(type, label));
-                                jsPhone.put(PHONE_NUMBER, data);
-                                jsPhoneNumbers.put(jsPhone);
-                            } catch (JSONException e) {
-                                e.printStackTrace();
-                            }
-                            break;
-                        // birthday
-                        case Event.CONTENT_ITEM_TYPE:
-                            int eventType = contactsCursor.getInt(
-                                contactsCursor.getColumnIndex(ContactsContract.CommonDataKinds.Contactables.TYPE)
-                            );
-                            if (eventType == Event.TYPE_BIRTHDAY) {
-                                jsContact.put(BIRTHDAY, data);
-                            }
-                            break;
-                        // organization
-                        case Organization.CONTENT_ITEM_TYPE:
-                            jsContact.put(ORGANIZATION_NAME, data);
-                            String organizationRole = contactsCursor.getString(contactsCursor.getColumnIndex(Organization.TITLE));
-                            if (organizationRole != null) {
-                                jsContact.put(ORGANIZATION_ROLE, organizationRole);
-                            }
-                            break;
-                        // photo
-                        case Photo.CONTENT_ITEM_TYPE:
-                            byte[] thumbnailPhoto = contactsCursor.getBlob(
-                                contactsCursor.getColumnIndex(ContactsContract.Contacts.Photo.PHOTO)
-                            );
-                            if (thumbnailPhoto != null) {
-                                String encodedThumbnailPhoto = Base64.encodeToString(thumbnailPhoto, Base64.NO_WRAP);
-                                jsContact.put(PHOTO_THUMBNAIL, "data:image/png;base64," + encodedThumbnailPhoto);
-                            }
-                            break;
+                        jsContacts.put(jsContact);
+                    } else {
+                        // this contact already exists,
+                        // retrieve it
+                        jsContact = contactsById.get(contactId);
                     }
 
-                    contactsById.put(contactId, jsContact);
+                    if (jsContact != null) {
+                        String mimeType = contactsCursor.getString(contactsCursor.getColumnIndex(ContactsContract.Data.MIMETYPE));
+                        String data = contactsCursor.getString(
+                            contactsCursor.getColumnIndex(ContactsContract.CommonDataKinds.Contactables.DATA)
+                        );
+                        int type = contactsCursor.getInt(contactsCursor.getColumnIndex(ContactsContract.CommonDataKinds.Contactables.TYPE));
+                        String label = contactsCursor.getString(
+                            contactsCursor.getColumnIndex(ContactsContract.CommonDataKinds.Contactables.LABEL)
+                        );
+
+                        // email
+                        switch (mimeType) {
+                            case Email.CONTENT_ITEM_TYPE:
+                                try {
+                                    // add this email to the list
+                                    JSArray emailAddresses = (JSArray) jsContact.get(EMAILS);
+                                    JSObject jsEmail = new JSObject();
+                                    jsEmail.put(EMAIL_LABEL, mapEmailTypeToLabel(type, label));
+                                    jsEmail.put(EMAIL_ADDRESS, data);
+                                    emailAddresses.put(jsEmail);
+                                } catch (JSONException e) {
+                                    e.printStackTrace();
+                                }
+                                break;
+                            // phone
+                            case Phone.CONTENT_ITEM_TYPE:
+                                try {
+                                    // add this phone to the list
+                                    JSArray jsPhoneNumbers = (JSArray) jsContact.get(PHONE_NUMBERS);
+                                    JSObject jsPhone = new JSObject();
+                                    jsPhone.put(PHONE_LABEL, mapPhoneTypeToLabel(type, label));
+                                    jsPhone.put(PHONE_NUMBER, data);
+                                    jsPhoneNumbers.put(jsPhone);
+                                } catch (JSONException e) {
+                                    e.printStackTrace();
+                                }
+                                break;
+                            // birthday
+                            case Event.CONTENT_ITEM_TYPE:
+                                int eventType = contactsCursor.getInt(
+                                    contactsCursor.getColumnIndex(ContactsContract.CommonDataKinds.Contactables.TYPE)
+                                );
+                                if (eventType == Event.TYPE_BIRTHDAY) {
+                                    jsContact.put(BIRTHDAY, data);
+                                }
+                                break;
+                            // organization
+                            case Organization.CONTENT_ITEM_TYPE:
+                                jsContact.put(ORGANIZATION_NAME, data);
+                                String organizationRole = contactsCursor.getString(contactsCursor.getColumnIndex(Organization.TITLE));
+                                if (organizationRole != null) {
+                                    jsContact.put(ORGANIZATION_ROLE, organizationRole);
+                                }
+                                break;
+                            // photo
+                            case Photo.CONTENT_ITEM_TYPE:
+                                byte[] thumbnailPhoto = contactsCursor.getBlob(
+                                    contactsCursor.getColumnIndex(ContactsContract.Contacts.Photo.PHOTO)
+                                );
+                                if (thumbnailPhoto != null) {
+                                    String encodedThumbnailPhoto = Base64.encodeToString(thumbnailPhoto, Base64.NO_WRAP);
+                                    jsContact.put(PHOTO_THUMBNAIL, "data:image/png;base64," + encodedThumbnailPhoto);
+                                }
+                                break;
+                        }
+
+                        contactsById.put(contactId, jsContact);
+                    }
                 }
             }
-        }
-        if (contactsCursor != null) {
-            contactsCursor.close();
-        }
+            if (contactsCursor != null) {
+                contactsCursor.close();
+            }
 
-        JSObject result = new JSObject();
-        result.put("contacts", jsContacts);
-        call.resolve(result);
+            JSObject result = new JSObject();
+            result.put("contacts", jsContacts);
+            call.resolve(result);
+        }
     }
 
     @PluginMethod
