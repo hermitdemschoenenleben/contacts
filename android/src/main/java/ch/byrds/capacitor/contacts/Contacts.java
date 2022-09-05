@@ -55,6 +55,10 @@ public class Contacts extends Plugin {
     private static final String ORGANIZATION_NAME = "organizationName";
     private static final String ORGANIZATION_ROLE = "organizationRole";
     private static final String BIRTHDAY = "birthday";
+    private static final String WHATSAPP = "whatsapp";
+
+
+    private static final String WHATSAPP_MINE_TYPE = "vnd.android.cursor.item/vnd.com.whatsapp.profile";
 
     @PluginMethod
     public void getPermissions(PluginCall call) {
@@ -105,13 +109,14 @@ public class Contacts extends Plugin {
                 ContactsContract.CommonDataKinds.Contactables.TYPE,
                 ContactsContract.CommonDataKinds.Contactables.LABEL
             };
-            String selection = ContactsContract.Data.MIMETYPE + " in (?, ?, ?, ?, ?)";
+            String selection = ContactsContract.Data.MIMETYPE + " in (?, ?, ?, ?, ?, ?)";
             String[] selectionArgs = new String[] {
                 Email.CONTENT_ITEM_TYPE,
                 Phone.CONTENT_ITEM_TYPE,
                 Event.CONTENT_ITEM_TYPE,
                 Organization.CONTENT_ITEM_TYPE,
-                Photo.CONTENT_ITEM_TYPE
+                Photo.CONTENT_ITEM_TYPE,
+                WHATSAPP_MINE_TYPE
             };
 
             Cursor contactsCursor = contentResolver.query(ContactsContract.Data.CONTENT_URI, projection, selection, selectionArgs, null);
@@ -157,6 +162,14 @@ public class Contacts extends Plugin {
 
                         // email
                         switch (mimeType) {
+                            case WHATSAPP_MINE_TYPE:
+                                jsContact.put(WHATSAPP, data);
+
+                                // use this to see what database fields exist (for debugging)
+                                // import android.database.DatabaseUtils;
+                                // DatabaseUtils.dumpCursor(contactsCursor);
+
+                                break;
                             case Email.CONTENT_ITEM_TYPE:
                                 try {
                                     // add this email to the list

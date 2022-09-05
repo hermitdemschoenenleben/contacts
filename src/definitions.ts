@@ -64,6 +64,7 @@ export interface Contact {
   organizationName?: string;
   organizationRole?: string;
   birthday?: string;
+  whatsapp?: string;
 }
 
 /**
